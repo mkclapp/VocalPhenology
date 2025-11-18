@@ -1,5 +1,7 @@
 **Files and variables**
+
   Pheno_MS_-_Submission_Copy_Zipped.zip: Zipped directory containing all files (below)
+
     **input**: contains data (.csv) files needed to run scripts
       IBP-AOS-LIST23.csv: file linking common names (column COMMONNAME), scientific names (SCINAME), and 4-letter species codes (SPEC)
       Nhits_tab.csv: table containing the number of BirdNET labels (nhits) generated for each bird species (BandCode) for which modeling was attempted. Band_Code joins with SPEC.
