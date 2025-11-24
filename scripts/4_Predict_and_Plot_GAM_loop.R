@@ -13,7 +13,7 @@ library(gratia)
 library(zoo)
 
 
-load(file="output/Zerofill_Sets.RData") # zero filled sets for different precision thresholds (no threshold="allspp", 0.90="trials.0fill.090", 0.95="trials.0fill.095", and 0.99="trials.0fill.099")
+load(file="input/Zerofill_Sets_20251107.RData") # zero filled sets for different precision thresholds (no threshold="allspp", 0.90="trials.0fill.090", 0.95="trials.0fill.095", and 0.99="trials.0fill.099")
 
 # choose which thresholded dataset to use, set "thresh" accordingly
 # NAs are present in all of the thresholded datasets due to the extremely low precision of btyw-- no btyw made it past a 0.90 pr(TP)
@@ -27,7 +27,7 @@ bin0$ElevBin <- factor(bin0$ElevBin, levels=c("Low","Mid"))
 # truncate Mid data to day 120
 bin0.occ <- bin0[!(bin0$ElevBin=="Mid" & bin0$JDay<120),] 
 
-bin0.occ %>% group_by(aou4, ElevBin) %>% summarise(nhits=sum(nhits)) %>% View()
+bin0.occ %>% group_by(aou4, ElevBin) %>% summarise(nhits=sum(nhits))# %>% View()
 
 # set region
 region <- "OLYM"
@@ -39,7 +39,7 @@ species.list <- as.character(sort(unique(bin0.occ$aou4)))
 elev.bin <- as.character(sort(unique(bin0.occ$ElevBin)))
 spline_type <- "tp"
 
-# Storage object
+# initialize data frame where phenometrics will be stored
 export.stats <- data.frame(
   species = NULL,
   elev.bin = NULL,
@@ -256,9 +256,11 @@ loc_data$ElevBin <- factor(loc_data$ElevBin, levels=c("Low", "Mid", "High"))
 
 # filter to models w/ elev overlap and sufficient data
 
-nhits.results <- trials.0fill.095 %>% left_join(loc_data) %>% filter(ElevBin !="High") %>% mutate(species=toupper(aou4), elev.bin=ElevBin, keep="unused") %>% group_by(species, elev.bin) %>% summarise(nhits = sum(nhits))
+nhits.results <- trials.0fill.095 %>% left_join(loc_data) %>% filter(ElevBin !="High") %>% mutate(species=toupper(aou4), elev.bin=ElevBin, keep="unused") %>% group_by(species, elev.bin) %>% summarise(nhits = sum(nhits)) %>% filter(!is.na(species))
 
 nhits.results %>% group_by(elev.bin) %>% summarise(n_distinct(species))
 mod.results <- results %>% separate(model_name, into = c("species", "elev.bin"), sep="_") %>% left_join(nhits.results)
 
-write.csv(mod.results, "./output/model_output/mod.results_20250309_filtered.csv")
+write.csv(mod.results, paste0("./output/model_output/gam.mod.results_", Sys.Date(), ".csv"))
+
+save(species.list, loc_data, nhits.results, export.stats, mod.results, file="./output/model_output/multispecies_GAM_results.RData")

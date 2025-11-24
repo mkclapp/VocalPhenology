@@ -12,77 +12,64 @@ library(ggpubr)
 
 
 cbFriendly <- c("#edc948","#e15759","#b07aa1","#004949", "#ff6db6", "#f28e2b", "#4e79a7")
-# Load in model outputs from Script 4
 
+# Run this file directly after script 4, or load in results from GAM run:
+load("./output/model_output/multispecies_GAM_results.RData") # loads in loc_data, nhits.results, phenometrics ("export.stats"), and mod.results (table of GAM fit results)
 
-# Load in pheno-metrics for this region from Script 4
- #pheno <- read.csv("./output/model_output/Phenometrics_OLYM_tp_ALLDATA_k=7_maxperc=0.3_pred_by_spp_thresh=0.95_2025-02-26.csv")
-# alternatively, reassign export.stats if you have just run script 4
 pheno <- export.stats
 
 # Read in bird table of species info
 birdtable <- read.csv("./input/Siegel_et_al_2012_Elevation_Ranges_of_Birds_NCCN_non0s.csv")
 head(birdtable)
 
-# from script 4, nhits.results shows the number of models that FIT (enough data)
-# bt2 will show the number of models that were attempted based on elevation overlap
-
-nhits_tab <- read.csv(nhits_tab, "./input/nhits_tab.csv")
-
 bt2 <- birdtable %>% 
   separate(Species, into = c("Common Name", "Scientific Name"), sep="[()]") %>%
   mutate(Low.Fit = ifelse(Band_Code %in% pheno$species & Low.Bin==1, 1, 0), 
          Mid.Fit = ifelse(Band_Code %in% pheno$species & Mid.Bin==1, 1, 0))  %>%
   filter(Band_Code %in% toupper(species.list)) %>% 
-  left_join(nhits_tab)
+  left_join(nhits.results, by=c("Band_Code" = "species"))
 
-bt2$Mid.Bin[bt2$Band_Code=="WETA"] <- 1 # lots of hits, let's model it
+bt2$Mid.Bin[bt2$Band_Code=="WETA"] <- 1 # unexpected # of hits for this elevation; we will review the model
+setdiff(toupper(bt2$Band_Code), export.stats$species) # make sure all species are in both tables (should read 0)
+setdiff(export.stats$species,toupper(bt2$Band_Code))
 
-#write.csv(bt2,paste0("./output/birdtable_29spp", Sys.Date(), ".csv"))
 
-#filter results to birds whose published ranges overlap the elev stratum definitions (mean +/- SD).
+### CREATE KEEP LIST - BIRDS WHOSE PHENOMETRICS SHOULD BE ANALYZED ###
+
+# first, filter results to birds whose published ranges overlap the elev stratum definitions (mean +/- SD).
 keeplist <- bt2 %>% select(Band_Code, Low.Bin, Mid.Bin) %>% mutate(species = Band_Code, Low=Low.Bin, Mid=Mid.Bin, .keep="unused") %>% pivot_longer(!species, names_to = "elev.bin", values_to = "Include")
 
-
-setdiff(toupper(bt2$Band_Code), export.stats$species) 
-
-
-
-# Who is vocalizing?------------------------------------------------------------------------------------------------------------------------------------
-#species.list <- as.character(sort(unique(bin0.occ$aou4)))
-#elev.bin <- as.character(sort(unique(bin0.occ$ElevBin)))
-
-# Exclusions for models with very poor fits/data-deficient
-# first exclude species x elev combos where range does not overlap
-pheno <- left_join(pheno, keeplist) %>% left_join(nhits.results, by=c("species", "elev.bin"))
+pheno.join <- left_join(pheno, keeplist,by=c("species", "elev.bin"), relationship = "many-to-many") %>% left_join(nhits.results, by=c("species", "elev.bin"))
 
 #n_distinct(verif_bind$common_name)
 n_distinct(bin0.occ$aou4)
-n_distinct(pheno$species)
+n_distinct(pheno.join$species) # does not include BTYW
 
-pheno
+head(pheno.join)
 
-# there is also a list of data-deficient species: ruhu, swth, wewp (fewer than 1000 detections overall, resulted in no model fit)
-pheno$Include[pheno$species=="RUHU" | pheno$species=="SWTH" | pheno$species=="WEWP"] <- 0
-pheno$Include[pheno$species=="YRWA" & pheno$elev.bin=="Low"] <- 0
-pheno$Include[pheno$species=="WAVI" & pheno$elev.bin=="Mid"] <- 0
-pheno$Include[pheno$species=="WETA" & pheno$elev.bin=="Mid"] <- 1
+# then exclude data-deficient species: fewer than 1000 detections overall, resulted in no model fit (ruhu, swth, wewp)
+
+nhits.results %>% filter(nhits < 1000)
+
+pheno.join$Include[pheno.join$species=="RUHU" | pheno.join$species=="SWTH" | pheno.join$species=="WEWP"] <- 0
+pheno.join$Include[pheno.join$species=="YRWA" & pheno.join$elev.bin=="Low"] <- 0
+pheno.join$Include[pheno.join$species=="WAVI" & pheno.join$elev.bin=="Mid"] <- 0
+pheno.join$Include[pheno.join$species=="WETA" & pheno.join$elev.bin=="Mid"] <- 1
 
 
-pheno_match <- pheno[pheno$Include==1,]
+# Who is vocalizing?------------------------------------------------------------------------------------------------------------------------------------
+
+pheno_match <- pheno.join[pheno.join$Include==1,]
 
 n_distinct(pheno_match$species)
 
-# reassigning 
-pheno1 <- pheno
-pheno <- pheno_match
-
 
 # For each elevation bin, for each species, it is 'singing' between the first half-rise (or left boundary) and last half-fall (or right boundary)
+# below code will generate warnings for spp x elev combos that cannot be estimated; that is OK
 pheno.period <- data.frame(species = NULL, elev.bin = NULL, start.date = NULL, end.date = NULL)
 for(i in 1:length(species.list)) {
   frame.i <- data.frame(species = toupper(species.list[i]), elev.bin = c("Low", "Mid"), start.date = NA, end.date = NA)
-  pheno.i <- pheno[pheno$species == toupper(species.list[i]), ]
+  pheno.i <- pheno_match[pheno_match$species == toupper(species.list[i]), ]
   frame.i[1, "start.date"] <- min(pheno.i[pheno.i$metric %in% c("Half Rise", "Start Boundary") & pheno.i$elev.bin == "Low", "jday"])
   frame.i[1, "end.date"] <- max(pheno.i[pheno.i$metric %in% c("Half Fall", "End Boundary") & pheno.i$elev.bin == "Low", "jday"])
   frame.i[2, "start.date"] <- min(pheno.i[pheno.i$metric %in% c("Half Rise", "Start Boundary") & pheno.i$elev.bin == "Mid", "jday"])
@@ -104,8 +91,8 @@ head(pheno.period)
 unique(pheno.period$species)
 pheno.period$duration <- pheno.period$end.date - pheno.period$start.date
 
-pheno_table <- left_join(pheno.period, bt2, by=c("species"="Band_Code"))
-#write.csv(pheno_table, "./output/pheno_table_25spp.csv")
+pheno_table <- left_join(pheno.period, bt2, by=c("species"="Band_Code", "elev.bin"="elev.bin"))
+#write.csv(pheno_table, "./output/pheno_table_25spp.csv") # generates Table S1
 
 pheno_table$MigStrat <- factor(pheno_table$X, levels = c("R", "SDM", "LDM", "IRR"))
 pheno_table$start.date.ymd <- as.Date(pheno_table$start.date, origin=as.Date("2021-01-01"))
@@ -117,16 +104,16 @@ pheno_table$end.date.ymd <- as.Date(pheno_table$end.date, origin=as.Date("2021-0
 # retrieve maxima from all species combos
 # calculate difference between maxima for spp with >1 maximum
 
-maxlist <- pheno %>% filter(metric=="Maximum" | metric=="Start Boundary") %>%
+maxlist <- pheno_match %>% filter(metric=="Maximum" | metric=="Start Boundary") %>%
   group_by(species, elev.bin)
 
-pheno %>% filter(metric=="Maximum"|metric=="Start Boundary") %>%
+pheno_match %>% filter(metric=="Maximum"|metric=="Start Boundary") %>%
   group_by(species, elev.bin) %>% 
   summarise(diffs = max(jday)-min(jday)) %>%
   filter(diffs > 0) 
 
 maxlist$Date <- as.Date(maxlist$jday, origin="2021-01-01")
-maxlist <- left_join(maxlist, bt2, by=c("species"="Band_Code"))
+maxlist <- left_join(maxlist, bt2, by=c("species"="Band_Code", "elev.bin"="elev.bin", "nhits"="nhits"))
 maxlist$MigStrat <-ifelse(maxlist$X=="R", "Resident", 
                           ifelse(maxlist$X=="SDM", "Short-\ndistance", 
                                  ifelse(maxlist$X=="LDM", "Long-\ndistance", "Irruptive")))
@@ -152,17 +139,13 @@ phenopd_spp_plot <- pheno_table %>% ggplot() +
   scale_y_date(date_labels = "%b %d", breaks = as.Date(c("2021-04-01","2021-05-01", "2021-06-01", "2021-07-01", "2021-08-01"))) 
 
 
-#ggsave(file="output/figures/25spp_phenopd_grouped_20250529.png", plot = phenopd_spp_plot,
-#       width=6.5, height = 7, units = "in", dpi=600)
+ggsave(file=paste0("output/figures/25spp_phenopd_grouped_", Sys.Date(), ".tif"), plot = phenopd_spp_plot, width=6.5, height = 7, units = "in", dpi=600)
 
 by_elevbin_migstrat <- pheno_table %>% group_by(elev.bin, ElevLab, MigStrat) %>% 
   summarise(n.species = n_distinct(species), mean.dur = mean(duration), sd.dur = sd(duration),
             mean.start = mean(start.date), sd.start = sd(start.date), 
             med.start = median(start.date), med.dur = median(duration))
 
-pheno %>% filter(metric=="Maximum") %>% left_join(bt2, by=c("species"="Band_Code")) %>% select(species, elev.bin, X) %>% group_by(X, elev.bin, species) %>% summarise(npeaks = n()) %>% group_by(elev.bin) %>% summarise(nspec = n_distinct(species[npeaks==0]), totspec= n_distinct(species), perc_spec = nspec/n_distinct(species))
-
-pheno_table
 
 
 # peaks
@@ -222,13 +205,13 @@ startpeakdur.hybrid <- ggarrange(startplot.c, peak_plot.c, durplot.c,
 
 pheno_table %>% group_by(X, MigStrat) %>% summarise(meandur = mean(duration), sddur = sd(duration))
 
-#ggsave("./output/figures/start_peak_dur_migstrat_25spp_20250422_HYBRID.png", plot = startpeakdur.hybrid,
- #      dpi=600, width = 7.5, height = 9, units = "in")  
+ggsave(filename = paste0("./output/figures/start_peak_dur_migstrat_25spp_", Sys.Date(), ".tif"), plot = startpeakdur.hybrid,
+       dpi=600, width = 6.5, height = 8.5, units = "in")  
 
 # Double Peaks
 
-dbl_peak <- pheno %>% filter(metric=="Maximum") %>%
-  left_join(bt2, by=c("species"="Band_Code")) %>%
+dbl_peak <- pheno_match %>% filter(metric=="Maximum") %>%
+  left_join(bt2,  by=c("species"="Band_Code", "elev.bin"="elev.bin")) %>%
   group_by(species, elev.bin, X) %>% 
   summarise(firstpeak = min(jday), secondpeak=max(jday), diffs = max(jday)-min(jday)) %>%
   filter(diffs > 0)
@@ -256,6 +239,6 @@ mean(dbl_peak$secondpeak)
 
 head(pheno)
 
-declines <- pheno %>% filter(metric=="Half Fall")
+declines <- pheno_match %>% filter(metric=="Half Fall")
 declines %>% group_by(elev.bin, species) %>% arrange(desc(jday)) %>% slice(1:1) %>% group_by(elev.bin) %>% summarise(mean_fall = mean(jday))
 
